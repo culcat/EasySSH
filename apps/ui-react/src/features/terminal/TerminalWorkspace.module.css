@@ -1,0 +1,151 @@
+.workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  height: 100%;
+  background-color: #030712;
+  overflow: hidden;
+}
+
+.tabBar {
+  display: flex;
+  align-items: center;
+  background-color: #0b1120;
+  border-bottom: 1px solid #1e293b;
+  padding: 0 0.5rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  min-height: 40px;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.85rem;
+  background: transparent;
+  border: none;
+  border-right: 1px solid #1e293b;
+  color: #94a3b8;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.tab:hover {
+  background-color: #1e293b;
+  color: #f1f5f9;
+}
+
+.tabActive {
+  background-color: #030712;
+  color: #f8fafc;
+  font-weight: 600;
+  border-bottom: 2px solid #3b82f6;
+}
+
+.tabCloseButton {
+  background: none;
+  border: none;
+  color: #64748b;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tabCloseButton:hover {
+  color: #f87171;
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+.terminalContainer {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  overflow: hidden;
+  background-color: #030712;
+  padding: 0.5rem;
+}
+
+.xtermHost {
+  width: 100%;
+  height: 100%;
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  height: 100%;
+  padding: 2rem;
+  text-align: center;
+  color: #64748b;
+  gap: 1rem;
+}
+
+.emptyTitle {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #94a3b8;
+  margin: 0;
+}
+
+.emptyDesc {
+  font-size: 0.875rem;
+  max-width: 400px;
+  margin: 0;
+}
+
+.statsBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem 0.75rem;
+  background-color: #0b1120;
+  border-top: 1px solid #1e293b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  min-height: 26px;
+}
+
+.statsLeft {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.statsRight {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.statItem {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.latencyLow {
+  color: #4ade80;
+}
+
+.latencyMedium {
+  color: #facc15;
+}
+
+.latencyHigh {
+  color: #f87171;
+}
+
+.fpsStat {
+  color: #60a5fa;
+}
