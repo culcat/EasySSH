@@ -246,7 +246,7 @@ mod tests {
             prop_assert_eq!(&debug_str, REDACTED_SECRET);
             prop_assert_eq!(&display_str, REDACTED_SECRET);
 
-            if !s.is_empty() && s != REDACTED_SECRET {
+            if !s.is_empty() && !REDACTED_SECRET.contains(&s) {
                 prop_assert!(!debug_str.contains(&s));
                 prop_assert!(!display_str.contains(&s));
             }
