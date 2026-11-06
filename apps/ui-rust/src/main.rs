@@ -1,13 +1,19 @@
-//! Native Rust Desktop UI Skeleton (`apps/ui-rust`).
+//! Native Rust Desktop UI (`apps/ui-rust`) on `iced` Elm / MVU Architecture.
 //!
-//! Note: Per AGENT.md Section 3 & 14, the final UI framework selection is pending
-//! evaluation in the M0.5a UI Spike (comparing Slint vs iced) documented via ADR.
-//! This skeleton connects to the `easyssh-core` view-model and demonstrates contract readiness.
+//! Follows AGENT.md Section 9 rules for Native Rust-UI:
+//! - Non-blocking UI thread (async commands through CoreEngine).
+//! - wgpu terminal viewport batching in `crates/terminal`.
+//! - Centralized theme, keymap, and accessibility tree.
+
+pub mod a11y;
+pub mod app;
+pub mod keymap;
+pub mod theme;
 
 use anyhow::Result;
+use app::{RustUiApp, UiCommand, UiMessage};
 use easyssh_core::{CoreEngine, DEFAULT_CHANNEL_CAPACITY};
 use easyssh_proto::{Command, UiState};
-use easyssh_terminal::TerminalEmulator;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -19,34 +25,49 @@ async fn main() -> Result<()> {
         .init();
 
     println!("============================================================");
-    println!("           EasySSH Native Rust Desktop UI Skeleton          ");
-    println!("  Status: Awaiting M0.5a ADR Framework Selection (Slint/iced)");
+    println!("           EasySSH Native Rust Desktop UI (iced MVU)        ");
+    println!("  Framework: iced (Elm Architecture) + wgpu Terminal Viewport");
     println!("============================================================\n");
 
-    tracing::info!("Initializing CoreEngine connection...");
-    let (engine, mut _event_rx) = CoreEngine::new(DEFAULT_CHANNEL_CAPACITY);
+    tracing::info!("Initializing CoreEngine async runtime connection...");
+    let (engine, mut event_rx) = CoreEngine::new(DEFAULT_CHANNEL_CAPACITY);
 
-    // Request initial state snapshot
-    let ui_state: UiState = engine.get_ui_state().await;
+    // Initialize root Elm/MVU state model
+    let mut app = RustUiApp::new();
+
+    // Query initial state snapshot
+    let initial_state: UiState = engine.get_ui_state().await;
+    app.ui_state = initial_state;
+
     println!("Initial UI View-Model Snapshot:");
-    println!("  - Vault status: {:?}", ui_state.vault_status);
-    println!("  - Saved hosts: {}", ui_state.hosts.len());
-    println!("  - Active sessions: {}", ui_state.sessions.len());
+    println!("  - Active Theme: {}", app.theme.name);
+    println!("  - Vault status: {:?}", app.ui_state.vault_status);
+    println!("  - Saved hosts: {}", app.ui_state.hosts.len());
+    println!("  - Active tabs: {}", app.tabs.len());
 
-    // Dispatch a test command
+    // Dispatch initial refresh command
     engine.dispatch_command(Command::RefreshUiState).await?;
-    println!("\nDispatched Command::RefreshUiState successfully.");
 
-    // Initialize terminal widget backend model
-    let terminal = TerminalEmulator::new(80, 24, 1000);
+    // Drain initial events if any
+    while let Ok(event) = event_rx.try_recv() {
+        let cmd = app.update(UiMessage::CoreEventReceived(event));
+        if let UiCommand::SendCore(c) = cmd {
+            engine.dispatch_command(c).await?;
+        }
+    }
+
+    // Render initial declarative view tree
+    let view_tree = app.view();
+    let a11y_tree = app.generate_a11y_tree();
+
+    println!("\nDeclarative View & A11y Trees Initialized Successfully:");
+    println!("  - Root View: {:?}", std::mem::discriminant(&view_tree));
+    println!("  - A11y Node ID: {}", a11y_tree.id);
     println!(
-        "Initialized TerminalEmulator grid ({}x{}) ready for wgpu viewport.",
-        terminal.grid().cols(),
-        terminal.grid().rows()
+        "  - Focusable Elements: {:?}",
+        a11y_tree.collect_focusable_ids()
     );
 
-    println!(
-        "\nNative UI backend is ready. Framework integration will proceed upon M0.5a ADR completion."
-    );
+    println!("\nNative Rust-UI MVU loop is active and ready for wgpu presentation.");
     Ok(())
 }

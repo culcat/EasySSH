@@ -1,6 +1,6 @@
 # ADR 0002: Rust-UI Framework Evaluation & Comparison (M0.5a Spike)
 
-- **Status**: Proposed (Awaiting User Approval)
+- **Status**: Accepted (iced selected by user)
 - **Date**: 2026-11-06
 - **Context**: Milestone M0.5a Spike for EasySSH Rust-UI (Native Desktop App)
 - **Supersedes**: None
@@ -140,25 +140,28 @@ Idle Session RAM      : 26.15 MiB (Target: < 80.0 MiB)
 
 ---
 
-## 5. Architectural Recommendation
+## 5. Decision Outcome
 
-### Primary Recommendation: **Adopt `iced` with Custom `wgpu` Terminal Subsystem**
+### Final Decision: **Adopt `iced` with Custom `wgpu` Terminal Subsystem**
 
-**Rationale**:
+The user and project leadership have reviewed the M0.5a spike evaluation and officially approved **`iced`** as the UI framework for `EasySSH` Native Desktop (`apps/ui-rust`).
+
+**Architecture Summary**:
+- **Application Core**: `iced` Elm/MVU (Model-View-Update) reactive application cycle (`Model`, `UiMessage`, `update`, `view`).
+- **Terminal Viewport**: Custom high-performance `wgpu` glyph-atlas and dirty-row batching subsystem implemented in `crates/terminal`, embedding directly into iced's rendering passes without offscreen blit overhead.
+- **Contract Boundary**: UI communicates with `CoreEngine` strictly through `easyssh-proto` Command / Event streams over non-blocking async channels.
+- **Licensing**: Permissive MIT license ensuring clean distribution and zero vendor lock-in.
+
+**Key Rationales Confirmed**:
 1. **Core Product Alignment**: `EasySSH` is first and foremost a high-performance terminal client. 85% of user screen time and GPU cycles happen inside the active terminal surface. `iced`'s direct `wgpu` integration (`iced_wgpu`) allows the terminal widget to render directly into the primary command encoder without intermediate texture blits, GPU synchronization fences, or property graph overhead.
 2. **Deterministic Memory and Latency**: As proven in `ui-rust-spike`, the custom dirty-row renderer delivers **1.54 ms** frame times and **62.17 MiB** total process RAM during 100,000-line bursts, well beneath our < 16.6 ms and < 80 MB targets.
 3. **Unencumbered Licensing**: The MIT license ensures `EasySSH` can be freely distributed, packaged, or commercialized without GPLv3 copyleft constraints or per-seat vendor licensing.
 4. **Mitigating Form Boilerplate**: The slightly higher verbosity of writing forms in pure Rust is easily addressed by breaking forms into small reusable view-model components (`proto::UiState`), which is already mandated by `AGENT.md` Section 7.
 
-### Alternative / Contingency: **`Slint`**
-If the project leadership determines that UI styling iteration speed and non-terminal UI (complex forms, settings panels, SFTP browser) take precedence over zero-overhead terminal rendering, and the licensing model (Royalty-Free Desktop or Commercial purchase) is acceptable, `Slint` remains a viable alternative with a dedicated offscreen `wgpu` surface bridge.
-
 ---
 
-## 6. Next Steps (Upon Approval)
+## 6. Implementation Status (Wave 2)
 
-1. User / Lead review and final approval of this ADR.
-2. If `iced` is approved:
-   - Initialize `apps/ui-rust` using `iced = "0.13"` (features: `wgpu`, `tokio`).
-   - Extract the spike's `DirtyRowTracker`, `GlyphAtlasStub`, and `TerminalViewport` into `crates/terminal`.
-   - Wire `apps/ui-rust` to `crates/proto` for Command/Event state streaming.
+1. ADR-0002 officially accepted.
+2. `crates/terminal` expanded with `TerminalRenderBatch`, `GlyphInstance`, and `DirtyRowSlice` wgpu instance batchers.
+3. `apps/ui-rust` initialized with full `iced` Elm/MVU architecture, accessible theme, customizable keymaps, screen-reader semantic trees (`a11y`), and multi-tab terminal workspace.
