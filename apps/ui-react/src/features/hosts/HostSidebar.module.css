@@ -23,6 +23,12 @@
   justify-content: space-between;
 }
 
+.headerButtons {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .title {
   margin: 0;
   font-size: 1.125rem;

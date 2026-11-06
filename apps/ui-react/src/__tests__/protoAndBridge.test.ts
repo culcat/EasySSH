@@ -5,6 +5,8 @@
  * 1. State updates and command dispatch cycle.
  * 2. Mandatory TOFU verification modal triggering (new host vs mismatch).
  * 3. Security invariant: Sensitive keys & passphrases are NEVER stored in browser storage.
+ * 4. OpenSSH ~/.ssh/config importing with strict ProxyCommand stripping.
+ * 5. SFTP remote file listing and upload/download/pause/resume/cancel lifecycle.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -13,8 +15,11 @@ import {
   toHostId,
   toSessionId,
   toKeyHandle,
+  toTransferId,
   type HostKeyVerification,
   type UiState,
+  type SftpEntry,
+  type SftpTransferProgress,
 } from '../types/proto';
 import { coreWorkerBridge } from '../services/coreWorkerBridge';
 
@@ -27,10 +32,12 @@ describe('Proto Contract and Types', () => {
     const hostId = toHostId('host-123');
     const sessionId = toSessionId('session-456');
     const keyHandle = toKeyHandle('key-789');
+    const transferId = toTransferId('transfer-abc');
 
     expect(hostId).toBe('host-123');
     expect(sessionId).toBe('session-456');
     expect(keyHandle).toBe('key-789');
+    expect(transferId).toBe('transfer-abc');
   });
 });
 
@@ -136,9 +143,156 @@ describe('CoreWorkerBridge & CoreWorkerInstance', () => {
   });
 });
 
+describe('OpenSSH Config Import & Security Guard', () => {
+  it('safely parses OpenSSH config blocks and strips ProxyCommand directives', () => {
+    const rawSshConfig = `
+# Global defaults
+Host *
+  ServerAliveInterval 60
+
+# Production cluster node
+Host prod-app
+  HostName app.easyssh.corp
+  User deploy
+  Port 22022
+  IdentityFile ~/.ssh/id_ed25519_deploy
+
+# Jump host configuration
+Host bastion-gw
+  HostName jump.easyssh.corp
+  User jumpuser
+  Port 22
+
+# Dangerous config with ProxyCommand injection attempt
+Host malicious-target
+  HostName internal.server
+  User root
+  ProxyCommand nc -X 5 -x 127.0.0.1:1080 %h %p
+  ProxyJump bastion-gw
+`;
+
+    let importEventResult: { importedCount: number; ignoredProxyCommands: readonly string[] } | undefined;
+
+    const unsubscribe = coreWorkerBridge.subscribe((event) => {
+      if (event.type === 'ssh_config_imported') {
+        importEventResult = {
+          importedCount: event.importedCount,
+          ignoredProxyCommands: event.ignoredProxyCommands,
+        };
+      }
+    });
+
+    coreWorkerBridge.dispatch({
+      type: 'import_ssh_config',
+      configText: rawSshConfig,
+    });
+
+    expect(importEventResult).toBeDefined();
+    expect(importEventResult?.importedCount).toBeGreaterThanOrEqual(3);
+
+    // SECURITY CHECK: ProxyCommand MUST be detected and ignored
+    expect(importEventResult?.ignoredProxyCommands.length).toBeGreaterThan(0);
+    expect(
+      importEventResult?.ignoredProxyCommands.some((c) => c.includes('ProxyCommand') || c.includes('nc -X'))
+    ).toBe(true);
+
+    // Check parsed hosts in state
+    const state = coreWorkerBridge.getState();
+    const importedHost = state.hosts.find((h) => h.label === 'prod-app');
+    expect(importedHost).toBeDefined();
+    expect(importedHost?.hostname).toBe('app.easyssh.corp');
+    expect(importedHost?.username).toBe('deploy');
+    expect(importedHost?.port).toBe(22022);
+    expect(importedHost?.identityFile).toBe('~/.ssh/id_ed25519_deploy');
+
+    unsubscribe();
+  });
+});
+
+describe('SFTP Remote File Browser & Transfer Queue', () => {
+  const testSessionId = toSessionId('sftp-test-session');
+
+  it('lists remote directory entries via sftp_list_dir', () => {
+    let capturedEntries: readonly SftpEntry[] = [];
+    let capturedPath = '';
+
+    const unsubscribe = coreWorkerBridge.subscribe((event) => {
+      if (event.type === 'sftp_dir_listed' && event.sessionId === testSessionId) {
+        capturedEntries = event.entries;
+        capturedPath = event.remotePath;
+      }
+    });
+
+    coreWorkerBridge.dispatch({
+      type: 'sftp_list_dir',
+      sessionId: testSessionId,
+      remotePath: '/var/log',
+    });
+
+    expect(capturedPath).toBe('/var/log');
+    expect(capturedEntries.length).toBeGreaterThan(0);
+    expect(capturedEntries.some((e) => e.name === '..')).toBe(true);
+    expect(capturedEntries.some((e) => e.isDir)).toBe(true);
+
+    unsubscribe();
+  });
+
+  it('manages file upload, progress tracking, pause/resume and cancellation', () => {
+    let latestProgress: SftpTransferProgress | undefined;
+
+    const unsubscribe = coreWorkerBridge.subscribe((event) => {
+      if (event.type === 'sftp_progress') {
+        latestProgress = event.progress;
+      }
+    });
+
+    // 1. Initiate upload
+    coreWorkerBridge.dispatch({
+      type: 'sftp_upload',
+      sessionId: testSessionId,
+      localPath: '/tmp/test-artifact.tar.gz',
+      remotePath: '/home/deploy/test-artifact.tar.gz',
+      size: 4194304,
+    });
+
+    expect(latestProgress).toBeDefined();
+    expect(latestProgress?.isUpload).toBe(true);
+    expect(latestProgress?.direction).toBe('upload');
+    expect(latestProgress?.state).toBe('transferring');
+    expect(latestProgress?.resumable).toBe(true);
+
+    const activeTransferId = latestProgress!.transferId;
+
+    // 2. Pause transfer
+    coreWorkerBridge.dispatch({
+      type: 'sftp_pause_resume',
+      transferId: activeTransferId,
+    });
+
+    expect(latestProgress?.state).toBe('paused');
+
+    // 3. Resume transfer
+    coreWorkerBridge.dispatch({
+      type: 'sftp_pause_resume',
+      transferId: activeTransferId,
+    });
+
+    expect(latestProgress?.state).toBe('transferring');
+
+    // 4. Cancel transfer
+    coreWorkerBridge.dispatch({
+      type: 'sftp_cancel',
+      transferId: activeTransferId,
+    });
+
+    expect(latestProgress?.state).toBe('cancelled');
+
+    unsubscribe();
+  });
+});
+
 describe('Security Invariant: No Storage Leakage', () => {
   beforeEach(() => {
-    // Clear any test mock storage
     if (typeof localStorage !== 'undefined') {
       localStorage.clear();
     }
@@ -156,7 +310,6 @@ describe('Security Invariant: No Storage Leakage', () => {
   it('verifies that host models hold only opaque KeyHandles and no raw private keys', () => {
     const state = coreWorkerBridge.getState();
     for (const host of state.hosts) {
-      // KeyHandle must be an opaque identifier string, never an actual PEM/OpenSSH private key block
       if (host.keyHandle) {
         expect(host.keyHandle).not.toMatch(/BEGIN OPENSSH PRIVATE KEY/i);
         expect(host.keyHandle).not.toMatch(/BEGIN RSA PRIVATE KEY/i);
@@ -166,7 +319,6 @@ describe('Security Invariant: No Storage Leakage', () => {
   });
 
   it('assertStorageSanity prevents execution if sensitive keys are stored in localStorage', () => {
-    // Create mock localStorage if not present in Node environment
     const storageMap = new Map<string, string>();
     const mockStorage: Storage = {
       length: 0,
@@ -194,7 +346,7 @@ describe('Security Invariant: No Storage Leakage', () => {
     mockStorage.setItem('cached_passphrase', 'supersecret');
     Object.defineProperty(mockStorage, 'length', { get: () => storageMap.size });
 
-    expect(() => coreWorkerBridge.assertStorageSanity()).toThrow(
+    expect(() => coreWorkerBridge.assertStorageSanity()).throw(
       /SECURITY VIOLATION: Sensitive data pattern "passphrase"/
     );
 

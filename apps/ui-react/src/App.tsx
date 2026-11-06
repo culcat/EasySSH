@@ -6,6 +6,8 @@ import { HostSidebar } from './features/hosts/HostSidebar';
 import { TerminalWorkspace } from './features/terminal/TerminalWorkspace';
 import { HostKeyDialog } from './features/security/HostKeyDialog';
 import { VaultModal } from './features/vault/VaultModal';
+import { SshConfigImportModal } from './features/hosts/SshConfigImportModal';
+import { SftpDrawer } from './features/sftp/SftpDrawer';
 import { Button, Badge } from './ui';
 import styles from './App.module.css';
 
@@ -13,6 +15,8 @@ const AppContent: React.FC = () => {
   const { locale, setLocale, t } = useI18n();
   const {
     state,
+    activeSession,
+    activeSftpEntries,
     unlockVault,
     lockVault,
     connectHost,
@@ -20,9 +24,17 @@ const AppContent: React.FC = () => {
     selectSession,
     sendTerminalInput,
     confirmHostKey,
+    importSshConfig,
+    sftpListDir,
+    sftpUpload,
+    sftpDownload,
+    sftpPauseResume,
+    sftpCancel,
   } = useCoreState();
 
   const [isVaultModalOpen, setIsVaultModalOpen] = useState(false);
+  const [isSshConfigModalOpen, setIsSshConfigModalOpen] = useState(false);
+  const [isSftpDrawerOpen, setIsSftpDrawerOpen] = useState(false);
 
   return (
     <div className={styles.appLayout}>
@@ -61,6 +73,23 @@ const AppContent: React.FC = () => {
             </button>
           </div>
 
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => setIsSshConfigModalOpen(true)}
+          >
+            {t('hosts.importSshConfigBtn')}
+          </Button>
+
+          <Button
+            size="sm"
+            variant={isSftpDrawerOpen ? 'primary' : 'secondary'}
+            onClick={() => setIsSftpDrawerOpen((prev) => !prev)}
+            disabled={!activeSession}
+          >
+            📁 {t('terminal.openSftp')}
+          </Button>
+
           <Badge
             variant={state.vault.isUnlocked ? 'success' : 'warning'}
             size="md"
@@ -85,6 +114,7 @@ const AppContent: React.FC = () => {
         <HostSidebar
           hosts={state.hosts}
           onConnect={connectHost}
+          onImportSshConfig={() => setIsSshConfigModalOpen(true)}
         />
         <TerminalWorkspace
           sessions={state.activeSessions}
@@ -112,6 +142,26 @@ const AppContent: React.FC = () => {
         isOpen={isVaultModalOpen}
         onClose={() => setIsVaultModalOpen(false)}
         onUnlock={unlockVault}
+      />
+
+      <SshConfigImportModal
+        isOpen={isSshConfigModalOpen}
+        onClose={() => setIsSshConfigModalOpen(false)}
+        onImport={importSshConfig}
+      />
+
+      <SftpDrawer
+        isOpen={isSftpDrawerOpen}
+        onClose={() => setIsSftpDrawerOpen(false)}
+        sessionId={activeSession?.sessionId}
+        sessionTitle={activeSession?.title}
+        entries={activeSftpEntries?.entries ?? []}
+        transfers={state.sftpTransfers}
+        onListDir={sftpListDir}
+        onUpload={sftpUpload}
+        onDownload={sftpDownload}
+        onPauseResume={sftpPauseResume}
+        onCancel={sftpCancel}
       />
     </div>
   );
