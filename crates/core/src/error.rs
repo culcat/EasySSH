@@ -63,6 +63,18 @@ pub enum CoreError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// SSH authentication failure.
+    #[error("Authentication failed: {0}")]
+    AuthenticationFailed(String),
+
+    /// SFTP protocol or transfer error.
+    #[error("SFTP error: {0}")]
+    SftpError(String),
+
+    /// CRDT sync or synchronization encryption error.
+    #[error("Sync error: {0}")]
+    SyncError(String),
+
     /// JSON serialization/deserialization failure.
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),

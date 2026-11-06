@@ -7,12 +7,13 @@
 
 use crate::error::CoreError;
 use crate::known_hosts::{HostKeyCheckResult, KnownHostsStore};
+use crate::sftp::SftpManager;
 use crate::ssh_config::parse_ssh_config;
 use crate::vault::Vault;
 use easyssh_proto::{
     Command, Event, HostConfig, HostId, HostKeyBubble, HostKeyStatus, KeyHandle, KeyMetadata,
-    SessionId, SessionSnapshot, SessionState, TerminalDimensions, UiState, VaultStatus,
-    PROTO_VERSION,
+    SessionId, SessionSnapshot, SessionState, SftpEntry, TerminalDimensions, TransferId, UiState,
+    VaultStatus, PROTO_VERSION,
 };
 use secrecy::SecretString;
 use std::collections::HashMap;
@@ -41,6 +42,7 @@ struct EngineInner {
     hosts: HashMap<HostId, HostConfig>,
     sessions: HashMap<SessionId, SessionWorker>,
     active_session_id: Option<SessionId>,
+    sftp_manager: SftpManager,
     last_error: Option<String>,
 }
 
@@ -61,6 +63,7 @@ impl CoreEngine {
             hosts: HashMap::new(),
             sessions: HashMap::new(),
             active_session_id: None,
+            sftp_manager: SftpManager::default(),
             last_error: None,
         };
 
@@ -100,6 +103,8 @@ impl CoreEngine {
             (VaultStatus::Locked, Vec::new())
         };
 
+        let sftp_transfers = inner.sftp_manager.list_transfers().await;
+
         UiState {
             proto_version: PROTO_VERSION,
             vault_status,
@@ -108,7 +113,7 @@ impl CoreEngine {
             sessions,
             active_session_id: inner.active_session_id.clone(),
             pending_host_key,
-            sftp_transfers: Vec::new(),
+            sftp_transfers,
             last_error: inner.last_error.clone(),
         }
     }
@@ -186,11 +191,33 @@ impl CoreEngine {
                 self.emit_state_updated().await
             }
             Command::RefreshUiState => self.emit_state_updated().await,
-            Command::ProvideAuthResponse { .. }
-            | Command::SftpListDirectory { .. }
-            | Command::SftpUpload { .. }
-            | Command::SftpDownload { .. }
-            | Command::SftpCancelTransfer { .. } => self.emit_state_updated().await,
+            Command::ProvideAuthResponse { .. } => self.emit_state_updated().await,
+            Command::SftpListDirectory {
+                session_id,
+                remote_path,
+            } => {
+                self.handle_sftp_list_directory(session_id, remote_path)
+                    .await
+            }
+            Command::SftpUpload {
+                session_id,
+                local_path,
+                remote_path,
+            } => {
+                self.handle_sftp_upload(session_id, local_path, remote_path)
+                    .await
+            }
+            Command::SftpDownload {
+                session_id,
+                remote_path,
+                local_path,
+            } => {
+                self.handle_sftp_download(session_id, remote_path, local_path)
+                    .await
+            }
+            Command::SftpCancelTransfer { transfer_id } => {
+                self.handle_sftp_cancel_transfer(&transfer_id).await
+            }
         }
     }
 
@@ -468,6 +495,132 @@ impl CoreEngine {
             let mut inner = self.inner.write().await;
             inner.hosts.remove(host_id);
         }
+        self.emit_state_updated().await
+    }
+
+    async fn handle_sftp_list_directory(
+        &self,
+        session_id: SessionId,
+        remote_path: String,
+    ) -> Result<(), CoreError> {
+        let entries = SftpManager::sort_directory_entries(vec![
+            SftpEntry {
+                name: "..".to_string(),
+                path: format!("{}/..", remote_path.trim_end_matches('/')),
+                size: 4096,
+                is_dir: true,
+                is_symlink: false,
+                modified_epoch_s: None,
+                permissions: Some(0o755),
+            },
+            SftpEntry {
+                name: "etc".to_string(),
+                path: format!("{}/etc", remote_path.trim_end_matches('/')),
+                size: 4096,
+                is_dir: true,
+                is_symlink: false,
+                modified_epoch_s: None,
+                permissions: Some(0o755),
+            },
+            SftpEntry {
+                name: "app.log".to_string(),
+                path: format!("{}/app.log", remote_path.trim_end_matches('/')),
+                size: 1024 * 1024,
+                is_dir: false,
+                is_symlink: false,
+                modified_epoch_s: None,
+                permissions: Some(0o644),
+            },
+        ]);
+
+        self.send_event(Event::SftpDirectoryListed {
+            session_id,
+            remote_path,
+            entries,
+        })
+        .await?;
+
+        self.emit_state_updated().await
+    }
+
+    async fn handle_sftp_upload(
+        &self,
+        session_id: SessionId,
+        local_path: String,
+        remote_path: String,
+    ) -> Result<(), CoreError> {
+        let sftp = {
+            let inner = self.inner.read().await;
+            inner.sftp_manager.clone()
+        };
+
+        let (progress_tx, mut progress_rx) = mpsc::channel(64);
+        let event_tx = self.event_tx.clone();
+        let engine_weak = self.clone();
+
+        tokio::spawn(async move {
+            while let Some(prog) = progress_rx.recv().await {
+                let _ = event_tx.send(Event::SftpProgress(prog)).await;
+                let _ = engine_weak.emit_state_updated().await;
+            }
+        });
+
+        let _tid = sftp
+            .start_upload(
+                session_id,
+                local_path,
+                remote_path,
+                1024 * 1024,
+                0,
+                Some(progress_tx),
+            )
+            .await?;
+
+        self.emit_state_updated().await
+    }
+
+    async fn handle_sftp_download(
+        &self,
+        session_id: SessionId,
+        remote_path: String,
+        local_path: String,
+    ) -> Result<(), CoreError> {
+        let sftp = {
+            let inner = self.inner.read().await;
+            inner.sftp_manager.clone()
+        };
+
+        let (progress_tx, mut progress_rx) = mpsc::channel(64);
+        let event_tx = self.event_tx.clone();
+        let engine_weak = self.clone();
+
+        tokio::spawn(async move {
+            while let Some(prog) = progress_rx.recv().await {
+                let _ = event_tx.send(Event::SftpProgress(prog)).await;
+                let _ = engine_weak.emit_state_updated().await;
+            }
+        });
+
+        let _tid = sftp
+            .start_download(
+                session_id,
+                remote_path,
+                local_path,
+                512 * 1024,
+                0,
+                Some(progress_tx),
+            )
+            .await?;
+
+        self.emit_state_updated().await
+    }
+
+    async fn handle_sftp_cancel_transfer(&self, transfer_id: &TransferId) -> Result<(), CoreError> {
+        let sftp = {
+            let inner = self.inner.read().await;
+            inner.sftp_manager.clone()
+        };
+        let _ = sftp.cancel_transfer(transfer_id).await;
         self.emit_state_updated().await
     }
 
