@@ -2,9 +2,14 @@
 
 pub mod grid;
 pub mod parser;
+pub mod renderer;
 
 pub use grid::{cell_flags, Cell, Color, Cursor, TerminalGrid};
 pub use parser::AnsiParser;
+pub use renderer::{
+    CursorQuad, CursorShape, DirtyRowSlice, GlyphInstance, ImeAnchor, SelectionQuad,
+    SelectionRange, TerminalBatcher, TerminalRenderBatch,
+};
 
 use std::time::{Duration, Instant};
 
@@ -87,6 +92,11 @@ impl TerminalEmulator {
     /// Resize terminal dimensions.
     pub fn resize(&mut self, cols: usize, rows: usize) {
         self.grid.resize(cols, rows);
+    }
+
+    /// Generate a GPU render batch containing dirty rows, cursor, selection, and IME state.
+    pub fn generate_render_batch(&self, batcher: &TerminalBatcher) -> TerminalRenderBatch {
+        batcher.generate_batch(&self.grid)
     }
 }
 
