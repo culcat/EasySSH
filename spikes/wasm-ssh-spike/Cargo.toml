@@ -1,0 +1,11 @@
+[package]
+name = "wasm-ssh-spike"
+version = "0.1.0"
+edition = "2021"
+authors = ["EasySSH Team"]
+description = "M0.5b WASM-SSH Spike: Async SSH packet transport, key auth, and backpressure over WebSocket relay"
+
+[workspace]
+
+[dependencies]
+# Zero external dependencies! Runs 100% offline in sandbox.

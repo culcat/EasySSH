@@ -1,0 +1,11 @@
+[package]
+name = "ui-rust-spike"
+version = "0.1.0"
+edition = "2021"
+authors = ["EasySSH Team"]
+description = "M0.5a Rust-UI Spike: wgpu-ready glyph-atlas, dirty-row renderer, and terminal benchmark harness"
+
+[workspace]
+
+[dependencies]
+# Standard library only! Zero external dependencies for 100% offline sandbox tests.
