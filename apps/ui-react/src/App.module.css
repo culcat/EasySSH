@@ -1,0 +1,70 @@
+.appLayout {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  background-color: #030712;
+  overflow: hidden;
+}
+
+.topBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1rem;
+  height: 48px;
+  background-color: #0b1120;
+  border-bottom: 1px solid #1e293b;
+  user-select: none;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: #f8fafc;
+}
+
+.brandIcon {
+  color: #3b82f6;
+}
+
+.topActions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.langToggle {
+  display: flex;
+  align-items: center;
+  background-color: #1e293b;
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.langBtn {
+  background: none;
+  border: none;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #94a3b8;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.langBtnActive {
+  background-color: #3b82f6;
+  color: #ffffff;
+}
+
+.mainContent {
+  display: flex;
+  flex: 1;
+  height: calc(100vh - 48px);
+  overflow: hidden;
+}

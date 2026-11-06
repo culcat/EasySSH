@@ -1,0 +1,14 @@
+{
+  "name": "easyssh-root",
+  "version": "0.1.0",
+  "private": true,
+  "description": "EasySSH root workspace",
+  "scripts": {
+    "dev": "pnpm --filter ui-react dev",
+    "build": "pnpm --filter ui-react build",
+    "lint": "pnpm --filter ui-react lint",
+    "typecheck": "pnpm --filter ui-react typecheck",
+    "test": "pnpm --filter ui-react test"
+  },
+  "packageManager": "pnpm@10.24.0"
+}
