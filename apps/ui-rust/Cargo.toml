@@ -1,0 +1,19 @@
+[package]
+name = "easyssh-ui-rust"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ui-rust"
+path = "src/main.rs"
+
+[dependencies]
+easyssh-core = { workspace = true }
+easyssh-proto = { workspace = true }
+easyssh-terminal = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
