@@ -7,7 +7,7 @@
  * 3. Security invariant: Sensitive keys & passphrases are NEVER stored in browser storage.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   PROTO_VERSION,
   toHostId,
@@ -17,7 +17,6 @@ import {
   type UiState,
 } from '../types/proto';
 import { coreWorkerBridge } from '../services/coreWorkerBridge';
-import { CoreWorkerInstance } from '../workers/core.worker';
 
 describe('Proto Contract and Types', () => {
   it('exposes correct protocol version matching core', () => {
@@ -36,12 +35,6 @@ describe('Proto Contract and Types', () => {
 });
 
 describe('CoreWorkerBridge & CoreWorkerInstance', () => {
-  let worker: CoreWorkerInstance;
-
-  beforeEach(() => {
-    worker = new CoreWorkerInstance();
-  });
-
   it('dispatches init and receives state snapshot', () => {
     const receivedStates: UiState[] = [];
     const unsubscribe = coreWorkerBridge.subscribe((event) => {
@@ -144,9 +137,6 @@ describe('CoreWorkerBridge & CoreWorkerInstance', () => {
 });
 
 describe('Security Invariant: No Storage Leakage', () => {
-  const originalLocalStorage = globalThis.localStorage;
-  const originalSessionStorage = globalThis.sessionStorage;
-
   beforeEach(() => {
     // Clear any test mock storage
     if (typeof localStorage !== 'undefined') {

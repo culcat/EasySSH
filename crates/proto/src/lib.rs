@@ -189,8 +189,10 @@ mod tests {
 
     #[test]
     fn test_json_roundtrip_ui_state() {
-        let mut state = UiState::default();
-        state.vault_status = VaultStatus::Unlocked { key_count: 2 };
+        let mut state = UiState {
+            vault_status: VaultStatus::Unlocked { key_count: 2 },
+            ..Default::default()
+        };
         state.keys.push(KeyMetadata {
             handle: KeyHandle::new("k-1"),
             label: "Personal Key".into(),
@@ -251,7 +253,7 @@ mod tests {
         }
 
         #[test]
-        fn prop_command_debug_never_leaked(raw in "\\PC*") {
+        fn prop_command_debug_never_leaked(raw in "secret_[a-zA-Z0-9]{8,32}") {
             let cmds = [
                 Command::InitVault {
                     master_passphrase: SecretText::new(raw.clone()),

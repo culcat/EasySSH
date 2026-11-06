@@ -127,6 +127,7 @@ impl AppHarness {
     ///
     /// Takes into account the sidebar width, tab bar height, cell geometry, HiDPI scaling,
     /// and ensures the popup does not overflow the right/bottom window boundaries.
+    #[allow(clippy::too_many_arguments)]
     pub fn calculate_ime_popup_position(
         &self,
         cursor_col: usize,

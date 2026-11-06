@@ -102,8 +102,7 @@ impl TerminalViewport {
             return;
         }
 
-        let mut current_col = col;
-        for ch in text.chars() {
+        for (current_col, ch) in (col..).zip(text.chars()) {
             if current_col >= self.cols {
                 break;
             }
@@ -118,7 +117,6 @@ impl TerminalViewport {
                 self.cells[idx] = cell;
                 self.tracker.mark_dirty(row);
             }
-            current_col += 1;
         }
     }
 

@@ -319,10 +319,12 @@ mod tests {
         let mut grid = TerminalGrid::new(5, 2, 10);
         grid.write_char('1', Color::DefaultFg, Color::DefaultBg, 0);
         grid.newline();
+        grid.carriage_return();
         grid.write_char('2', Color::DefaultFg, Color::DefaultBg, 0);
 
         // Next newline will scroll row 0 into scrollback
         grid.newline();
+        grid.carriage_return();
         assert_eq!(grid.scrollback_len(), 1);
 
         grid.write_char('3', Color::DefaultFg, Color::DefaultBg, 0);

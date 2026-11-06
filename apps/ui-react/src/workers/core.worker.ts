@@ -17,7 +17,6 @@ import type {
   HostKeyVerification,
   HostId,
   SessionId,
-  KeyHandle,
 } from '../types/proto';
 import { toHostId, toSessionId, toKeyHandle } from '../types/proto';
 
@@ -49,6 +48,12 @@ const initialHosts: HostConfig[] = [
 ];
 
 class CoreWorkerInstance {
+  private readonly onEvent?: (event: Event) => void;
+
+  public constructor(onEvent?: (event: Event) => void) {
+    this.onEvent = onEvent;
+  }
+
   private state: UiState = {
     vault: {
       isInitialized: true,
@@ -307,6 +312,10 @@ class CoreWorkerInstance {
   }
 
   private emit(event: Event): void {
+    if (this.onEvent) {
+      this.onEvent(event);
+      return;
+    }
     if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
       self.postMessage(event);
     }

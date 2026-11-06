@@ -32,6 +32,7 @@ struct SessionWorker {
     title: String,
     pending_host_key: Option<HostKeyBubble>,
     input_tx: mpsc::Sender<Vec<u8>>,
+    _input_rx: mpsc::Receiver<Vec<u8>>,
 }
 
 struct EngineInner {
@@ -208,7 +209,7 @@ impl CoreEngine {
         };
 
         let session_id = SessionId::new(format!("sess-{}", rand::random::<u32>()));
-        let (input_tx, _input_rx) = mpsc::channel(DEFAULT_CHANNEL_CAPACITY);
+        let (input_tx, input_rx) = mpsc::channel(DEFAULT_CHANNEL_CAPACITY);
         let title = format!("{}@{}", host_config.username, host_config.hostname);
 
         {
@@ -223,6 +224,7 @@ impl CoreEngine {
                     title,
                     pending_host_key: None,
                     input_tx,
+                    _input_rx: input_rx,
                 },
             );
             inner.active_session_id = Some(session_id.clone());

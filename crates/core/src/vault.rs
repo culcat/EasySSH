@@ -42,6 +42,7 @@ struct VaultPayload {
 }
 
 /// Secure in-memory vault holding decrypted keys and cryptographic operations.
+#[derive(Default)]
 pub struct Vault {
     unlocked_payload: Option<VaultPayload>,
 }

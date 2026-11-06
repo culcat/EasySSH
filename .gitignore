@@ -10,6 +10,7 @@ target/
 # Node & Package Managers
 node_modules/
 dist/
+*.tsbuildinfo
 build/
 .pnpm-store/
 .pnpm-debug.log*

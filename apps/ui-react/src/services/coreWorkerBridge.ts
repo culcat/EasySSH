@@ -60,14 +60,12 @@ class CoreWorkerBridge {
       }
     };
 
-    if (typeof window !== 'undefined') {
-      try {
-        checkStorage(window.localStorage, 'localStorage');
-        checkStorage(window.sessionStorage, 'sessionStorage');
-      } catch (err) {
-        if (err instanceof Error && err.message.startsWith('SECURITY VIOLATION')) {
-          throw err;
-        }
+    try {
+      checkStorage(globalThis.localStorage, 'localStorage');
+      checkStorage(globalThis.sessionStorage, 'sessionStorage');
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('SECURITY VIOLATION')) {
+        throw err;
       }
     }
   }
@@ -102,19 +100,10 @@ class CoreWorkerBridge {
     }
 
     // Node or environment without Worker support (e.g. unit tests)
-    this.fallbackWorker = new CoreWorkerInstance();
-    // Intercept worker output in fallback mode
-    const originalPostMessage = typeof self !== 'undefined' ? self.postMessage : undefined;
-    if (typeof self !== 'undefined') {
-      // @ts-expect-error patching for fallback
-      self.postMessage = (event: Event) => {
-        this.handleIncomingEvent(event);
-      };
-    }
+    this.fallbackWorker = new CoreWorkerInstance((event: Event) => {
+      this.handleIncomingEvent(event);
+    });
     this.dispatch({ type: 'init' });
-    if (typeof self !== 'undefined' && originalPostMessage) {
-      self.postMessage = originalPostMessage;
-    }
   }
 
   public dispatch(command: Command): void {

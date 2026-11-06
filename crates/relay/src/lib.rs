@@ -4,11 +4,13 @@
 //! SSH hosts with bounded buffers (`tokio::io::copy_bidirectional`).
 //! Inspects ZERO payload content and records only connection metadata.
 
-use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
+
+static NEXT_RELAY_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Relay operation error variants.
 #[derive(Debug, Error)]
@@ -105,7 +107,10 @@ impl RelayServer {
             let target_addr = self.target_addr.clone();
 
             tokio::spawn(async move {
-                let session_id = format!("relay-{}", rand::random::<u32>());
+                let session_id = format!(
+                    "relay-{}",
+                    NEXT_RELAY_SESSION_ID.fetch_add(1, Ordering::Relaxed)
+                );
                 let client_addr_str = client_peer.to_string();
 
                 match TcpStream::connect(&target_addr).await {

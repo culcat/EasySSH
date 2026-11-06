@@ -1,6 +1,12 @@
 import type { en } from './locales/en';
 
-export type TranslationSchema = typeof en;
+type WidenStrings<T> = T extends string
+  ? string
+  : {
+      readonly [K in keyof T]: WidenStrings<T[K]>;
+    };
+
+export type TranslationSchema = WidenStrings<typeof en>;
 export type Locale = 'en' | 'ru';
 
 export type NestedKeyOf<ObjectType extends object> = {

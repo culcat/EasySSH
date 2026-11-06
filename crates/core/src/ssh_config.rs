@@ -156,15 +156,14 @@ pub fn parse_ssh_config(content: &str) -> Result<Vec<HostConfig>, CoreError> {
 }
 
 fn split_directive(line: &str) -> Option<(&str, &str)> {
-    if let Some(eq_idx) = line.find('=') {
-        let (k, v) = line.split_at(eq_idx);
-        Some((k.trim(), v[1..].trim()))
-    } else {
-        let mut parts = line.splitn(2, char::is_whitespace);
-        let key = parts.next()?.trim();
-        let value = parts.next()?.trim();
-        Some((key, value))
+    let sep_idx = line.find(|c: char| c.is_whitespace() || c == '=')?;
+    let key = line[..sep_idx].trim();
+    let rest = line[sep_idx..].trim_start();
+    let value = rest.strip_prefix('=').unwrap_or(rest).trim();
+    if key.is_empty() || value.is_empty() {
+        return None;
     }
+    Some((key, value))
 }
 
 fn merge_defaults(target: &mut ConfigSection, source: &ConfigSection) {

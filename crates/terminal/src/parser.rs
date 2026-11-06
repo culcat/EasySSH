@@ -1,6 +1,6 @@
 //! ANSI / VT sequence parser and grid state mutator.
 
-use crate::grid::{cell_flags, Cell, Color, TerminalGrid};
+use crate::grid::{cell_flags, Color, TerminalGrid};
 
 /// Parser state machine for streaming ANSI escape sequences.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
