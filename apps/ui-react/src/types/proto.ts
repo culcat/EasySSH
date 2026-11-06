@@ -20,10 +20,12 @@ export type Brand<T, B> = T & { readonly [BrandSymbol]: B };
 export type HostId = Brand<string, 'HostId'>;
 export type SessionId = Brand<string, 'SessionId'>;
 export type KeyHandle = Brand<string, 'KeyHandle'>;
+export type TransferId = Brand<string, 'TransferId'>;
 
 export const toHostId = (id: string): HostId => id as HostId;
 export const toSessionId = (id: string): SessionId => id as SessionId;
 export const toKeyHandle = (id: string): KeyHandle => id as KeyHandle;
+export const toTransferId = (id: string): TransferId => id as TransferId;
 
 export type AuthMethodType = 'password' | 'publicKey' | 'agent' | 'interactive';
 
@@ -38,6 +40,7 @@ export interface HostConfig {
   readonly keyHandle?: KeyHandle;
   readonly tags: readonly string[];
   readonly jumpHostId?: HostId;
+  readonly identityFile?: string;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
@@ -80,19 +83,43 @@ export interface SessionSnapshot {
   readonly errorMessage?: string;
 }
 
+/**
+ * Metadata for a file or directory entry retrieved via SFTP.
+ * Matches crates/proto::sftp::SftpEntry.
+ */
+export interface SftpEntry {
+  readonly name: string;
+  readonly path: string;
+  readonly size: number;
+  readonly isDir: boolean;
+  readonly isSymlink: boolean;
+  readonly modifiedEpochS?: number;
+  readonly permissions?: number;
+}
+
 export type TransferDirection = 'upload' | 'download';
-export type TransferStatus = 'queued' | 'in_progress' | 'completed' | 'failed' | 'cancelled';
+export type SftpTransferState =
+  | 'pending'
+  | 'transferring'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
 
 export interface SftpTransferProgress {
-  readonly transferId: string;
+  readonly transferId: TransferId;
   readonly sessionId: SessionId;
   readonly remotePath: string;
+  readonly localPath: string;
   readonly localFileName: string;
   readonly direction: TransferDirection;
+  readonly isUpload: boolean;
   readonly bytesTransferred: number;
   readonly totalBytes: number;
-  readonly status: TransferStatus;
+  readonly resumable: boolean;
+  readonly state: SftpTransferState;
   readonly speedBytesPerSec: number;
+  readonly errorMessage?: string;
 }
 
 export type Command =
@@ -104,9 +131,16 @@ export type Command =
   | { readonly type: 'terminal_input'; readonly sessionId: SessionId; readonly data: string }
   | { readonly type: 'terminal_resize'; readonly sessionId: SessionId; readonly cols: number; readonly rows: number }
   | { readonly type: 'confirm_host_key'; readonly hostId: HostId; readonly accepted: boolean; readonly remember: boolean }
+  | { readonly type: 'create_host'; readonly host: HostConfig }
   | { readonly type: 'save_host'; readonly host: HostConfig }
   | { readonly type: 'delete_host'; readonly hostId: HostId }
-  | { readonly type: 'select_session'; readonly sessionId: SessionId };
+  | { readonly type: 'select_session'; readonly sessionId: SessionId }
+  | { readonly type: 'import_ssh_config'; readonly configText: string }
+  | { readonly type: 'sftp_list_dir'; readonly sessionId: SessionId; readonly remotePath: string }
+  | { readonly type: 'sftp_upload'; readonly sessionId: SessionId; readonly localPath: string; readonly remotePath: string; readonly size?: number }
+  | { readonly type: 'sftp_download'; readonly sessionId: SessionId; readonly remotePath: string; readonly localPath: string; readonly size?: number }
+  | { readonly type: 'sftp_pause_resume'; readonly transferId: TransferId }
+  | { readonly type: 'sftp_cancel'; readonly transferId: TransferId };
 
 export type Event =
   | { readonly type: 'state_snapshot'; readonly state: UiState }
@@ -116,6 +150,8 @@ export type Event =
   | { readonly type: 'terminal_output'; readonly sessionId: SessionId; readonly data: string }
   | { readonly type: 'host_key_verify_request'; readonly verification: HostKeyVerification }
   | { readonly type: 'sftp_progress'; readonly progress: SftpTransferProgress }
+  | { readonly type: 'sftp_dir_listed'; readonly sessionId: SessionId; readonly remotePath: string; readonly entries: readonly SftpEntry[] }
+  | { readonly type: 'ssh_config_imported'; readonly importedCount: number; readonly ignoredProxyCommands: readonly string[] }
   | { readonly type: 'error_occurred'; readonly code: string; readonly message: string; readonly details?: string };
 
 export interface UiState {
@@ -125,4 +161,5 @@ export interface UiState {
   readonly selectedSessionId?: SessionId;
   readonly pendingHostKeyVerification?: HostKeyVerification;
   readonly sftpTransfers: readonly SftpTransferProgress[];
+  readonly sftpEntriesBySession?: Readonly<Record<SessionId, { readonly remotePath: string; readonly entries: readonly SftpEntry[] }>>;
 }

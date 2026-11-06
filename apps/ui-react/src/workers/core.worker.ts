@@ -3,9 +3,9 @@
  *
  * CRITICAL SECURITY INVARIANT:
  * All SSH connections, cryptographic operations, host key validations,
- * and decrypted private key material live strictly inside this worker's
- * isolated thread. Raw private keys and cleartext passphrases NEVER
- * leave this worker.
+ * OpenSSH config parsing, and decrypted private key material live strictly
+ * inside this worker's isolated thread. Raw private keys and cleartext
+ * passphrases NEVER leave this worker.
  */
 
 import type {
@@ -17,8 +17,11 @@ import type {
   HostKeyVerification,
   HostId,
   SessionId,
+  TransferId,
+  SftpEntry,
+  SftpTransferProgress,
 } from '../types/proto';
-import { toHostId, toSessionId, toKeyHandle } from '../types/proto';
+import { toHostId, toSessionId, toKeyHandle, toTransferId } from '../types/proto';
 
 // Initial mock state for M0 scaffold
 const initialHosts: HostConfig[] = [
@@ -47,6 +50,15 @@ const initialHosts: HostConfig[] = [
   },
 ];
 
+interface ParsedSshBlock {
+  alias: string;
+  hostName?: string;
+  user?: string;
+  port?: number;
+  identityFile?: string;
+  proxyJump?: string;
+}
+
 class CoreWorkerInstance {
   private readonly onEvent?: (event: Event) => void;
 
@@ -66,6 +78,7 @@ class CoreWorkerInstance {
     selectedSessionId: undefined,
     pendingHostKeyVerification: undefined,
     sftpTransfers: [],
+    sftpEntriesBySession: {},
   };
 
   public handleCommand(command: Command): void {
@@ -76,8 +89,6 @@ class CoreWorkerInstance {
       }
 
       case 'unlock_vault': {
-        // In full WASM integration, passphrase is fed to Argon2id in crates/core.
-        // Once decrypted, memory holding passphrase must be scrubbed immediately.
         const isPassphraseValid = command.passphrase.trim().length > 0;
         if (isPassphraseValid) {
           this.state = {
@@ -134,7 +145,6 @@ class CoreWorkerInstance {
       }
 
       case 'terminal_input': {
-        // Echo input back with simple simulation for M0 scaffold
         if (command.data === '\r') {
           this.emit({
             type: 'terminal_output',
@@ -152,10 +162,10 @@ class CoreWorkerInstance {
       }
 
       case 'terminal_resize': {
-        // PTY window resize command
         break;
       }
 
+      case 'create_host':
       case 'save_host': {
         const existingIndex = this.state.hosts.findIndex((h) => h.id === command.host.id);
         const updatedHosts = [...this.state.hosts];
@@ -189,7 +199,338 @@ class CoreWorkerInstance {
         this.emitState();
         break;
       }
+
+      case 'import_ssh_config': {
+        this.handleImportSshConfig(command.configText);
+        break;
+      }
+
+      case 'sftp_list_dir': {
+        this.handleSftpListDir(command.sessionId, command.remotePath);
+        break;
+      }
+
+      case 'sftp_upload': {
+        this.handleSftpUpload(command.sessionId, command.localPath, command.remotePath, command.size);
+        break;
+      }
+
+      case 'sftp_download': {
+        this.handleSftpDownload(command.sessionId, command.remotePath, command.localPath, command.size);
+        break;
+      }
+
+      case 'sftp_pause_resume': {
+        this.handleSftpPauseResume(command.transferId);
+        break;
+      }
+
+      case 'sftp_cancel': {
+        this.handleSftpCancel(command.transferId);
+        break;
+      }
     }
+  }
+
+  /**
+   * Safely parse OpenSSH ~/.ssh/config format.
+   *
+   * SECURITY INVARIANT:
+   * ProxyCommand is intentionally IGNORED and NOT EXECUTED to prevent arbitrary
+   * command injection from malicious configuration files.
+   */
+  private handleImportSshConfig(configText: string): void {
+    const lines = configText.split(/\r?\n/);
+    const parsedBlocks: ParsedSshBlock[] = [];
+    const ignoredProxyCommands: string[] = [];
+
+    let currentBlock: ParsedSshBlock | null = null;
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) {
+        continue;
+      }
+
+      // Check key-value pairs (space or equal separated)
+      const match = line.match(/^([A-Za-z0-9_]+)[=\s]+(.*)$/);
+      if (!match) continue;
+
+      const key = match[1]?.toLowerCase();
+      const value = match[2]?.trim() ?? '';
+
+      if (key === 'host') {
+        // Start of new host block(s)
+        const aliases = value.split(/\s+/).filter(Boolean);
+        for (const alias of aliases) {
+          if (alias === '*') {
+            // Global wildcard defaults can be skipped for host card creation
+            currentBlock = null;
+            continue;
+          }
+          currentBlock = { alias };
+          parsedBlocks.push(currentBlock);
+        }
+      } else if (currentBlock) {
+        if (key === 'hostname') {
+          currentBlock.hostName = value;
+        } else if (key === 'user') {
+          currentBlock.user = value;
+        } else if (key === 'port') {
+          const parsedPort = parseInt(value, 10);
+          if (!isNaN(parsedPort) && parsedPort > 0) {
+            currentBlock.port = parsedPort;
+          }
+        } else if (key === 'identityfile') {
+          currentBlock.identityFile = value;
+        } else if (key === 'proxyjump') {
+          currentBlock.proxyJump = value;
+        } else if (key === 'proxycommand') {
+          // SECURITY VIOLATION PREVENTION:
+          // Strictly reject and ignore ProxyCommand directives!
+          ignoredProxyCommands.push(`${currentBlock.alias}: ${value}`);
+        }
+      }
+    }
+
+    const newHosts: HostConfig[] = parsedBlocks.map((block) => {
+      const tags: string[] = ['ssh-config'];
+      if (block.proxyJump) {
+        tags.push('jump-host');
+      }
+
+      return {
+        id: toHostId(`host-sshconfig-${block.alias.toLowerCase().replace(/[^a-z0-9-]/g, '-')}`),
+        label: block.alias,
+        hostname: block.hostName || block.alias,
+        port: block.port || 22,
+        username: block.user || 'root',
+        authMethod: block.identityFile ? 'publicKey' : 'password',
+        identityFile: block.identityFile,
+        tags,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+    });
+
+    // Merge without duplicate IDs
+    const existingIds = new Set(this.state.hosts.map((h) => h.id));
+    const uniqueNewHosts = newHosts.filter((h) => !existingIds.has(h.id));
+
+    this.state = {
+      ...this.state,
+      hosts: [...this.state.hosts, ...uniqueNewHosts],
+    };
+
+    this.emit({
+      type: 'ssh_config_imported',
+      importedCount: uniqueNewHosts.length,
+      ignoredProxyCommands,
+    });
+    this.emitState();
+  }
+
+  private handleSftpListDir(sessionId: SessionId, remotePath: string): void {
+    const cleanPath = remotePath.startsWith('/') ? remotePath : `/${remotePath}`;
+
+    // Generate mock directory listing representing standard remote server hierarchy
+    const mockEntries: SftpEntry[] = [
+      {
+        name: '..',
+        path: cleanPath === '/' ? '/' : cleanPath.replace(/\/[^/]+$/, '') || '/',
+        size: 4096,
+        isDir: true,
+        isSymlink: false,
+        modifiedEpochS: Math.floor(Date.now() / 1000) - 3600,
+        permissions: 0o755,
+      },
+      {
+        name: 'bin',
+        path: `${cleanPath === '/' ? '' : cleanPath}/bin`,
+        size: 4096,
+        isDir: true,
+        isSymlink: false,
+        modifiedEpochS: Math.floor(Date.now() / 1000) - 86400 * 10,
+        permissions: 0o755,
+      },
+      {
+        name: 'etc',
+        path: `${cleanPath === '/' ? '' : cleanPath}/etc`,
+        size: 4096,
+        isDir: true,
+        isSymlink: false,
+        modifiedEpochS: Math.floor(Date.now() / 1000) - 86400 * 5,
+        permissions: 0o755,
+      },
+      {
+        name: 'logs',
+        path: `${cleanPath === '/' ? '' : cleanPath}/logs`,
+        size: 4096,
+        isDir: true,
+        isSymlink: false,
+        modifiedEpochS: Math.floor(Date.now() / 1000) - 600,
+        permissions: 0o755,
+      },
+      {
+        name: 'app.config.yaml',
+        path: `${cleanPath === '/' ? '' : cleanPath}/app.config.yaml`,
+        size: 2048,
+        isDir: false,
+        isSymlink: false,
+        modifiedEpochS: Math.floor(Date.now() / 1000) - 3600 * 2,
+        permissions: 0o644,
+      },
+      {
+        name: 'server.log',
+        path: `${cleanPath === '/' ? '' : cleanPath}/server.log`,
+        size: 1548576, // ~1.5 MB
+        isDir: false,
+        isSymlink: false,
+        modifiedEpochS: Math.floor(Date.now() / 1000) - 60,
+        permissions: 0o644,
+      },
+      {
+        name: 'current_build.tar.gz',
+        path: `${cleanPath === '/' ? '' : cleanPath}/current_build.tar.gz`,
+        size: 8388608, // 8 MB
+        isDir: false,
+        isSymlink: false,
+        modifiedEpochS: Math.floor(Date.now() / 1000) - 86400,
+        permissions: 0o644,
+      },
+    ];
+
+    const currentEntriesMap = { ...this.state.sftpEntriesBySession };
+    currentEntriesMap[sessionId] = {
+      remotePath: cleanPath,
+      entries: mockEntries,
+    };
+
+    this.state = {
+      ...this.state,
+      sftpEntriesBySession: currentEntriesMap,
+    };
+
+    this.emit({
+      type: 'sftp_dir_listed',
+      sessionId,
+      remotePath: cleanPath,
+      entries: mockEntries,
+    });
+    this.emitState();
+  }
+
+  private handleSftpUpload(sessionId: SessionId, localPath: string, remotePath: string, size?: number): void {
+    const transferId = toTransferId(`xfer-up-${Date.now()}`);
+    const fileName = localPath.split(/[/\\]/).pop() || 'upload.bin';
+    const totalBytes = size || 2097152; // 2MB
+
+    const newTransfer: SftpTransferProgress = {
+      transferId,
+      sessionId,
+      localPath,
+      localFileName: fileName,
+      remotePath,
+      direction: 'upload',
+      isUpload: true,
+      bytesTransferred: 524288,
+      totalBytes,
+      resumable: true,
+      state: 'transferring',
+      speedBytesPerSec: 524288,
+    };
+
+    this.state = {
+      ...this.state,
+      sftpTransfers: [newTransfer, ...this.state.sftpTransfers],
+    };
+
+    this.emit({
+      type: 'sftp_progress',
+      progress: newTransfer,
+    });
+    this.emitState();
+  }
+
+  private handleSftpDownload(sessionId: SessionId, remotePath: string, localPath: string, size?: number): void {
+    const transferId = toTransferId(`xfer-down-${Date.now()}`);
+    const fileName = remotePath.split('/').pop() || 'download.bin';
+    const totalBytes = size || 4194304; // 4MB
+
+    const newTransfer: SftpTransferProgress = {
+      transferId,
+      sessionId,
+      localPath,
+      localFileName: fileName,
+      remotePath,
+      direction: 'download',
+      isUpload: false,
+      bytesTransferred: 1048576,
+      totalBytes,
+      resumable: true,
+      state: 'transferring',
+      speedBytesPerSec: 1048576,
+    };
+
+    this.state = {
+      ...this.state,
+      sftpTransfers: [newTransfer, ...this.state.sftpTransfers],
+    };
+
+    this.emit({
+      type: 'sftp_progress',
+      progress: newTransfer,
+    });
+    this.emitState();
+  }
+
+  private handleSftpPauseResume(transferId: TransferId): void {
+    const transfer = this.state.sftpTransfers.find((t) => t.transferId === transferId);
+    if (!transfer) return;
+
+    const nextState = transfer.state === 'transferring' ? 'paused' : 'transferring';
+    const updatedTransfer: SftpTransferProgress = {
+      ...transfer,
+      state: nextState,
+      speedBytesPerSec: nextState === 'paused' ? 0 : 524288,
+    };
+
+    this.state = {
+      ...this.state,
+      sftpTransfers: this.state.sftpTransfers.map((t) =>
+        t.transferId === transferId ? updatedTransfer : t
+      ),
+    };
+
+    this.emit({
+      type: 'sftp_progress',
+      progress: updatedTransfer,
+    });
+    this.emitState();
+  }
+
+  private handleSftpCancel(transferId: TransferId): void {
+    const transfer = this.state.sftpTransfers.find((t) => t.transferId === transferId);
+    if (!transfer) return;
+
+    const updatedTransfer: SftpTransferProgress = {
+      ...transfer,
+      state: 'cancelled',
+      speedBytesPerSec: 0,
+    };
+
+    this.state = {
+      ...this.state,
+      sftpTransfers: this.state.sftpTransfers.map((t) =>
+        t.transferId === transferId ? updatedTransfer : t
+      ),
+    };
+
+    this.emit({
+      type: 'sftp_progress',
+      progress: updatedTransfer,
+    });
+    this.emitState();
   }
 
   private initiateConnection(hostId: HostId): void {
@@ -203,9 +544,7 @@ class CoreWorkerInstance {
       return;
     }
 
-    // Check if host requires TOFU verification (e.g., simulating TOFU for first connect or mismatch test)
     if (host.hostname.includes('staging')) {
-      // Simulate TOFU first-time verification
       const verification: HostKeyVerification = {
         hostId: host.id,
         hostname: host.hostname,
@@ -226,7 +565,6 @@ class CoreWorkerInstance {
       return;
     }
 
-    // Direct connect
     this.createActiveSession(host);
   }
 
@@ -276,7 +614,6 @@ class CoreWorkerInstance {
     });
     this.emitState();
 
-    // Initial terminal greeting
     this.emit({
       type: 'terminal_output',
       sessionId,

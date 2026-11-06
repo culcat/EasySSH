@@ -10,12 +10,14 @@ export interface HostSidebarProps {
   readonly hosts: readonly HostConfig[];
   readonly onConnect: (hostId: HostId) => void;
   readonly onAddHost?: () => void;
+  readonly onImportSshConfig?: () => void;
 }
 
 export const HostSidebar: React.FC<HostSidebarProps> = ({
   hosts,
   onConnect,
   onAddHost,
+  onImportSshConfig,
 }) => {
   const { t } = useI18n();
   const [searchQuery, setSearchQuery] = useState('');
@@ -72,11 +74,23 @@ export const HostSidebar: React.FC<HostSidebarProps> = ({
             </svg>
             {t('hosts.title')}
           </h1>
-          {onAddHost && (
-            <Button size="sm" variant="ghost" onClick={onAddHost} aria-label={t('hosts.addHost')}>
-              +
-            </Button>
-          )}
+          <div className={styles.headerButtons}>
+            {onImportSshConfig && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={onImportSshConfig}
+                aria-label={t('hosts.importSshConfigBtn')}
+              >
+                ⤓
+              </Button>
+            )}
+            {onAddHost && (
+              <Button size="sm" variant="ghost" onClick={onAddHost} aria-label={t('hosts.addHost')}>
+                +
+              </Button>
+            )}
+          </div>
         </div>
 
         <div className={styles.searchContainer}>
